@@ -65,32 +65,24 @@ load_config() {
 
     if [[ -n "$specified_config" ]]; then
         # 用户手动指定配置
-        if [[ "$specified_config" == /* ]]; then
-            CONFIG_PATH="$specified_config"
-        else
-            CONFIG_PATH="${PROFILES_DIR}/${specified_config}"
-        fi
+        local base_name="$(basename "$specified_config")"
+        local target_path="${PROFILES_DIR}/${base_name}"
 
-        [[ -f "$CONFIG_PATH" ]] || die "指定的配置文件不存在: ${CONFIG_PATH}"
-    else
-        # 自动选择最新修改的配置文件
-        CONFIG_PATH=$(find "$PROFILES_DIR" -maxdepth 1 -name '*.json' -type f -printf '%T@ %p\n' 2>/dev/null \
-            | sort -rn \
-            | head -1 \
-            | cut -d' ' -f2-)
-
-        # 兼容 macOS (BSD find 不支持 -printf)
-        if [[ -z "$CONFIG_PATH" ]]; then
-            CONFIG_PATH=$(find "$PROFILES_DIR" -maxdepth 1 -name '*.json' -type f -exec stat -f '%m %N' {} + 2>/dev/null \
-                | sort -rn \
-                | head -1 \
-                | cut -d' ' -f2-)
-        fi
-
-        [[ -n "$CONFIG_PATH" ]] || die "无法定位配置文件"
+        [[ -f "$target_path" ]] || die "指定的配置文件不存在: ${target_path}"
+        
+        # 更新活跃指针，仅使用相对路径名
+        ln -sf "$base_name" "${PROFILES_DIR}/active.json"
     fi
 
-    CONFIG_NAME="$(basename "$CONFIG_PATH")"
+    CONFIG_PATH="${PROFILES_DIR}/active.json"
+
+    [[ -f "$CONFIG_PATH" ]] || die "未发现活跃节点\n    请运行: ./shield.sh <节点文件名.json> 激活一个真实节点，或使用转换工具导入"
+
+    if [[ -L "$CONFIG_PATH" ]]; then
+        CONFIG_NAME="$(readlink "$CONFIG_PATH")"
+    else
+        CONFIG_NAME="active.json"
+    fi
 
     # 提取端口号（从 JSON 配置中解析 SOCKS5 和 HTTP 端口）
     extract_ports
