@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# ============================================================================
+# V6_Shield — 极简 Xray 启动脚本
+# 环境校验 → 配置装载 → 端口检测 → 前台托管
+# 遵循"前台运行，随终端生灭"哲学
+# ============================================================================
+
+set -euo pipefail
+
+# ── 颜色定义 ──────────────────────────────────────────────────────────────────
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly CYAN='\033[0;36m'
+readonly BOLD='\033[1m'
+readonly DIM='\033[2m'
+readonly RESET='\033[0m'
+
+# ── 脚本根目录 ────────────────────────────────────────────────────────────────
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly XRAY_BIN="${SCRIPT_DIR}/xray"
+readonly PROFILES_DIR="${SCRIPT_DIR}/profiles"
+
+# ============================================================================
+# 工具函数
+# ============================================================================
+
+die() {
+    echo -e "${RED}[FATAL] $1${RESET}" >&2
+    exit 1
+}
+
+# ============================================================================
+# 步骤 1：开局物理斩断 (Fail-Fast)
+# ============================================================================
+
+preflight_check() {
+    # ── 无核心则死 ────────────────────────────────────────────────────────
+    if [[ ! -f "$XRAY_BIN" ]]; then
+        die "未检测到 Xray 核心程序 (${XRAY_BIN})\n    请将 xray 二进制文件放置在项目根目录"
+    fi
+
+    if [[ ! -x "$XRAY_BIN" ]]; then
+        die "Xray 核心程序无执行权限\n    请执行: chmod +x ${XRAY_BIN}"
+    fi
+
+    # ── 空目录则死 ────────────────────────────────────────────────────────
+    if [[ ! -d "$PROFILES_DIR" ]]; then
+        die "未检测到 profiles/ 目录\n    请先使用转换工具导入 VLESS 节点:\n    ./converter.sh \"vless://...\""
+    fi
+
+    local json_count
+    json_count=$(find "$PROFILES_DIR" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l)
+
+    if (( json_count == 0 )); then
+        die "未检测到配置文件，请先使用转换工具导入 VLESS 节点:\n    ./converter.sh \"vless://...\""
+    fi
+}
+
+# ============================================================================
+# 步骤 2：优雅寻址与装载
+# ============================================================================
+
+load_config() {
+    local specified_config="${1:-}"
+
+    if [[ -n "$specified_config" ]]; then
+        # 用户手动指定配置
+        if [[ "$specified_config" == /* ]]; then
+            CONFIG_PATH="$specified_config"
+        else
+            CONFIG_PATH="${PROFILES_DIR}/${specified_config}"
+        fi
+
+        [[ -f "$CONFIG_PATH" ]] || die "指定的配置文件不存在: ${CONFIG_PATH}"
+    else
+        # 自动选择最新修改的配置文件
+        CONFIG_PATH=$(find "$PROFILES_DIR" -maxdepth 1 -name '*.json' -type f -printf '%T@ %p\n' 2>/dev/null \
+            | sort -rn \
+            | head -1 \
+            | cut -d' ' -f2-)
+
+        # 兼容 macOS (BSD find 不支持 -printf)
+        if [[ -z "$CONFIG_PATH" ]]; then
+            CONFIG_PATH=$(find "$PROFILES_DIR" -maxdepth 1 -name '*.json' -type f -exec stat -f '%m %N' {} + 2>/dev/null \
+                | sort -rn \
+                | head -1 \
+                | cut -d' ' -f2-)
+        fi
+
+        [[ -n "$CONFIG_PATH" ]] || die "无法定位配置文件"
+    fi
+
+    CONFIG_NAME="$(basename "$CONFIG_PATH")"
+
+    # 提取端口号（从 JSON 配置中解析 SOCKS5 和 HTTP 端口）
+    extract_ports
+}
+
+extract_ports() {
+    # 向上搜索 protocol 附近的 port，不依赖 JSON 键顺序
+    SOCKS_PORT=$(grep -B4 '"protocol".*"socks"' "$CONFIG_PATH" | grep '"port"' | grep -oE '[0-9]+' | head -1)
+    HTTP_PORT=$(grep -B4 '"protocol".*"http"' "$CONFIG_PATH" | grep '"port"' | grep -oE '[0-9]+' | head -1)
+    : "${SOCKS_PORT:=37080}"
+    : "${HTTP_PORT:=37081}"
+}
+
+# ============================================================================
+# 步骤 3：接管与生灭
+# ============================================================================
+
+# 跨平台端口检测
+check_port() {
+    local port="$1"
+    local occupied=1  # 1 = not occupied (shell convention: 0=true, 1=false)
+
+    # 优先使用 ss
+    if command -v ss &>/dev/null; then
+        ss -tlnH "sport = :${port}" 2>/dev/null | grep -q "${port}" && occupied=0
+    # 次选 lsof
+    elif command -v lsof &>/dev/null; then
+        lsof -iTCP:"${port}" -sTCP:LISTEN -P -n &>/dev/null && occupied=0
+    # 兜底 netstat
+    elif command -v netstat &>/dev/null; then
+        netstat -tln 2>/dev/null | grep -q ":${port} " && occupied=0
+    fi
+
+    return $occupied
+}
+
+verify_ports() {
+    local has_conflict=0
+
+    if check_port "$SOCKS_PORT"; then
+        echo -e "${RED}[CONFLICT] SOCKS5 端口 ${SOCKS_PORT} 已被占用${RESET}" >&2
+        has_conflict=1
+    fi
+
+    if check_port "$HTTP_PORT"; then
+        echo -e "${RED}[CONFLICT] HTTP 端口 ${HTTP_PORT} 已被占用${RESET}" >&2
+        has_conflict=1
+    fi
+
+    if (( has_conflict )); then
+        die "端口冲突，无法启动\n    请检查是否有其他代理实例正在运行"
+    fi
+}
+
+print_banner() {
+    echo ""
+    echo -e "  ${GREEN}${BOLD}V6_Shield${RESET} ${DIM}·${RESET} ${GREEN}引擎活跃${RESET}"
+    echo ""
+    echo -e "    ${DIM}SOCKS5${RESET}  ${CYAN}127.0.0.1:${SOCKS_PORT}${RESET}"
+    echo -e "    ${DIM}HTTP${RESET}    ${CYAN}127.0.0.1:${HTTP_PORT}${RESET}"
+    echo -e "    ${DIM}配置${RESET}    profiles/${CONFIG_NAME}"
+    echo -e "    ${DIM}退出${RESET}    Ctrl+C 或关闭终端"
+    echo ""
+    echo -e "  ${DIM}── Xray 输出 ─────────────────────${RESET}"
+    echo ""
+}
+
+# ============================================================================
+# 主逻辑
+# ============================================================================
+
+main() {
+    local config_arg="${1:-}"
+
+    # 步骤 1: Fail-Fast
+    preflight_check
+
+    # 步骤 2: 装载配置
+    load_config "$config_arg"
+
+    # 步骤 3: 端口校验 + 前台托管
+    verify_ports
+    print_banner
+
+    # 阻塞托管: exec 替换当前进程为 Xray
+    # 实现真正的"随窗生灭"——终端关闭即进程销毁
+    exec "$XRAY_BIN" -c "$CONFIG_PATH"
+}
+
+main "$@"
