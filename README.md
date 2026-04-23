@@ -10,15 +10,16 @@
 V6_Shield/
 ├── shield.sh       # 启动脚本（主入口）
 ├── converter.sh    # VLESS 订阅转换器
-├── profiles/       # 节点配置存放目录
-│   └── *.json      # 自动生成的 Xray 配置
-└── xray            # Xray Core 二进制（需自行放置）
+├── install_xray.sh # Xray 自动安装器
+├── profiles/       # 节点配置总仓库 (可拥有无数备用参数)
+├── run/            # 仅在运行时出现，绝对隔离运行沙箱（专门存放 xray 唯一的 config.json）
+└── xray            # Xray Core 二进制
 ```
 
-三大组件完全解耦：
-- **converter.sh** — 订阅转换，纯 Bash，零依赖
-- **shield.sh** — 环境校验 + 前台托管
-- **profiles/** — 配置物理隔离
+三大核心哲学彻底解耦：
+- **配置文件物理隔离**：所有的订阅转换沉淀在 `profiles/` 这座兵工厂内。
+- **运行沙箱绝对纯净**：真正交给 `shield.sh` 与 `xray` 挂载的只有 `run/config.json` 这一条航线。绝不将备件带上战场，没有任何其他东西。
+- **一键无缝热切换**：调用 `./shield.sh <节点>`，它会自动执行清空运行道 -> 输送新节点 -> 激活进程。一条命令斩断所有前置烦恼。
 
 ## 快速开始
 
@@ -34,20 +35,20 @@ chmod +x install_xray.sh
 ### 2. 导入节点
 
 ```bash
-# 转换 VLESS 链接为配置文件
+# 生成并自动将其投放进 run/ 专区作为默认运行配置
 ./converter.sh "vless://uuid@server:443?type=ws&security=tls&path=/ws#MyNode"
 
-# 自定义输出文件名
+# 自定义在 profiles 仓库中的存根文件名
 ./converter.sh "vless://..." -o my_server.json
 ```
 
-### 3. 启动代理
+### 3. 极速起航与切换
 
 ```bash
-# 自动加载最新配置
+# 自动启动存在于 run/ 沙箱中的配置
 ./shield.sh
 
-# 手动指定配置文件
+# 想要切换配置？无需深入路径！这一条参数会自动洗刷沙箱，完成优雅变轨
 ./shield.sh my_server.json
 ```
 

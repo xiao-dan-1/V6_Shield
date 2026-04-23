@@ -19,6 +19,7 @@ readonly RESET='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly XRAY_BIN="${SCRIPT_DIR}/xray"
 readonly PROFILES_DIR="${SCRIPT_DIR}/profiles"
+readonly RUN_DIR="${SCRIPT_DIR}/run"
 
 # ============================================================================
 # 工具函数
@@ -43,16 +44,9 @@ preflight_check() {
         die "Xray 核心程序无执行权限\n    请执行: chmod +x ${XRAY_BIN}"
     fi
 
-    # ── 空目录则死 ────────────────────────────────────────────────────────
+    # ── 空配置则死 ────────────────────────────────────────────────────────
     if [[ ! -d "$PROFILES_DIR" ]]; then
         die "未检测到 profiles/ 目录\n    请先使用转换工具导入 VLESS 节点:\n    ./converter.sh \"vless://...\""
-    fi
-
-    local json_count
-    json_count=$(find "$PROFILES_DIR" -maxdepth 1 -name '*.json' -type f 2>/dev/null | wc -l)
-
-    if (( json_count == 0 )); then
-        die "未检测到配置文件，请先使用转换工具导入 VLESS 节点:\n    ./converter.sh \"vless://...\""
     fi
 }
 
@@ -64,24 +58,27 @@ load_config() {
     local specified_config="${1:-}"
 
     if [[ -n "$specified_config" ]]; then
-        # 用户手动指定配置
+        # 激活阶段：将目标节点变为绝对活跃姿态
         local base_name="$(basename "$specified_config")"
         local target_path="${PROFILES_DIR}/${base_name}"
 
         [[ -f "$target_path" ]] || die "指定的配置文件不存在: ${target_path}"
         
-        # 更新活跃指针，仅使用相对路径名
-        ln -sf "$base_name" "${PROFILES_DIR}/active.json"
+        # 净化运行道并锚定配置
+        mkdir -p "$RUN_DIR"
+        rm -f "${RUN_DIR}"/*
+        cp "$target_path" "${RUN_DIR}/config.json"
+        
+        CONFIG_NAME="$base_name"
     fi
 
-    CONFIG_PATH="${PROFILES_DIR}/active.json"
+    CONFIG_PATH="${RUN_DIR}/config.json"
 
-    [[ -f "$CONFIG_PATH" ]] || die "未发现活跃节点\n    请运行: ./shield.sh <节点文件名.json> 激活一个真实节点，或使用转换工具导入"
+    [[ -f "$CONFIG_PATH" ]] || die "运行专区不存在有效配置\n    请运行: ./shield.sh <节点文件名.json> 进行节点切换与锚定"
 
-    if [[ -L "$CONFIG_PATH" ]]; then
-        CONFIG_NAME="$(readlink "$CONFIG_PATH")"
-    else
-        CONFIG_NAME="active.json"
+    # 抽取回显名字。由于运行区失去名字上下文，如果不是刚传入，便只显示通用名。
+    if [[ -z "${CONFIG_NAME:-}" ]]; then
+        CONFIG_NAME="[活跃态运行组]"
     fi
 
     # 提取端口号（从 JSON 配置中解析 SOCKS5 和 HTTP 端口）

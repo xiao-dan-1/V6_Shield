@@ -375,8 +375,14 @@ main() {
 
     local output_path="${PROFILES_DIR}/${output_name}"
 
-    # 生成配置
+    # 生成配置至库
     generate_config "$output_path"
+
+    # 激活新节点：将物理副本当作唯一的运行态置于 run/ 下
+    local run_dir="${SCRIPT_DIR}/run"
+    mkdir -p "$run_dir"
+    rm -f "${run_dir}"/*
+    cp "$output_path" "${run_dir}/config.json"
 
     # 输出摘要
     echo ""

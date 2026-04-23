@@ -214,3 +214,7 @@ xray.exe
 # Runtime node configs (contain sensitive credentials)
 profiles/*.json
 !profiles/.gitkeep
+
+# Running state isolated directory
+run/*
+!run/.gitkeep
