@@ -17,7 +17,7 @@ readonly PROFILES_DIR="${SCRIPT_DIR}/profiles"
 readonly RUN_DIR="${SCRIPT_DIR}/run"
 
 die() {
-    echo -e "${RED}[错误] $1${RESET}" >&2
+    echo -e "${RED}[FATAL] $1${RESET}" >&2
     exit 1
 }
 

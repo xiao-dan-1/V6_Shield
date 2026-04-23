@@ -26,7 +26,7 @@ readonly PROFILES_DIR="${SCRIPT_DIR}/profiles"
 # ============================================================================
 
 die() {
-    echo -e "${RED}[ERROR] $1${RESET}" >&2
+    echo -e "${RED}[FATAL] $1${RESET}" >&2
     exit 1
 }
 
@@ -320,7 +320,22 @@ generate_config() {
       "tag": "direct",
       "protocol": "freedom"
     }
-  ]
+  ],
+  "routing": {
+    "domainStrategy": "AsIs",
+    "rules": [
+      {
+        "type": "field",
+        "outboundTag": "direct",
+        "ip": ["127.0.0.0/8", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "::1/128", "fc00::/7", "fe80::/10"]
+      },
+      {
+        "type": "field",
+        "outboundTag": "direct",
+        "domain": ["localhost"]
+      }
+    ]
+  }
 }
 JSONEOF
 }

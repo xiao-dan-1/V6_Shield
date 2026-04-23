@@ -12,8 +12,8 @@ V6_Shield/
 ├── nodes.sh        # 节点管理交互控制台
 ├── converter.sh    # VLESS 订阅转换器
 ├── install_xray.sh # Xray 自动安装器
-├── profiles/       # 节点配置总仓库 (可拥有无数备用参数)
-├── run/            # 仅在运行时出现，绝对隔离运行沙箱（专门存放 xray 唯一的 config.json）
+├── profiles/       # 节点配置仓库
+├── run/            # 运行沙箱（仅存放当前 config.json）
 └── xray            # Xray Core 二进制
 ```
 

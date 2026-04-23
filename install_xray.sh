@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly XRAY_BIN="${SCRIPT_DIR}/xray"
 
 die() {
-    echo -e "${RED}[错误] $1${RESET}" >&2
+    echo -e "${RED}[FATAL] $1${RESET}" >&2
     exit 1
 }
 

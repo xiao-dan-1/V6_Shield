@@ -210,6 +210,7 @@ __marimo__/
 # Xray core binary
 xray
 xray.exe
+xray_tmp.zip
 
 # Runtime node configs (contain sensitive credentials)
 profiles/*.json

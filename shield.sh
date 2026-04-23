@@ -145,7 +145,7 @@ print_banner() {
     echo ""
     echo -e "    ${DIM}SOCKS5${RESET}  ${CYAN}127.0.0.1:${SOCKS_PORT}${RESET}"
     echo -e "    ${DIM}HTTP${RESET}    ${CYAN}127.0.0.1:${HTTP_PORT}${RESET}"
-    echo -e "    ${DIM}配置${RESET}    profiles/${CONFIG_NAME}"
+    echo -e "    ${DIM}节点${RESET}    ${CONFIG_NAME}"
     echo -e "    ${DIM}退出${RESET}    Ctrl+C 或关闭终端"
     echo ""
     echo -e "  ${DIM}── Xray 输出 ─────────────────────${RESET}"
