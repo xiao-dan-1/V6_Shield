@@ -68,6 +68,7 @@ load_config() {
         mkdir -p "$RUN_DIR"
         rm -f "${RUN_DIR}"/*
         cp "$target_path" "${RUN_DIR}/config.json"
+        echo "$base_name" > "${RUN_DIR}/node.name"
         
         CONFIG_NAME="$base_name"
     fi
@@ -76,9 +77,13 @@ load_config() {
 
     [[ -f "$CONFIG_PATH" ]] || die "运行专区不存在有效配置\n    请运行: ./shield.sh <节点文件名.json> 进行节点切换与锚定"
 
-    # 抽取回显名字。由于运行区失去名字上下文，如果不是刚传入，便只显示通用名。
+    # 抽取回显名字。由于运行区失去名字上下文，便优先从记录指针读取
     if [[ -z "${CONFIG_NAME:-}" ]]; then
-        CONFIG_NAME="[活跃态运行组]"
+        if [[ -f "${RUN_DIR}/node.name" ]]; then
+            CONFIG_NAME="$(<"${RUN_DIR}/node.name")"
+        else
+            CONFIG_NAME="[运行沙箱当前配置]"
+        fi
     fi
 
     # 提取端口号（从 JSON 配置中解析 SOCKS5 和 HTTP 端口）

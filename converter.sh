@@ -383,6 +383,7 @@ main() {
     mkdir -p "$run_dir"
     rm -f "${run_dir}"/*
     cp "$output_path" "${run_dir}/config.json"
+    echo "$output_name" > "${run_dir}/node.name"
 
     # 输出摘要
     echo ""
