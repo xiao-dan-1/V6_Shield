@@ -19,8 +19,8 @@ V6_Shield/
 
 三大核心哲学彻底解耦：
 - **配置文件物理隔离**：所有的订阅转换沉淀在 `profiles/` 这座兵工厂内。
-- **运行沙箱绝对纯净**：真正交给 `shield.sh` 与 `xray` 挂载的只有 `run/config.json` 这一条航线。绝不将备件带上战场，没有任何其他东西。
-- **命令行即视窗**：交互全凭 `./nodes.sh` 菜单，选定即重构沙箱；调用 `./shield.sh <节点>`，它会自动执行清空运行道 -> 输送新节点 -> 激活进程。一条命令斩断所有前置烦恼。
+- **运行沙箱绝对纯净**：真正交给 `shield.sh` 与 `xray` 挂载的只有 `run/config.json` 这一条航线。
+- **职责单一**：`converter.sh` 只管转换存档，`shield.sh` 负责激活与托管，`nodes.sh` 负责交互管理。
 
 ## 快速开始
 
@@ -36,21 +36,21 @@ chmod +x install_xray.sh
 ### 2. 导入节点
 
 ```bash
-# 生成并自动将其投放进 run/ 专区作为默认运行配置
+# 转换 VLESS 链接，生成配置存入 profiles/
 ./converter.sh "vless://uuid@server:443?type=ws&security=tls&path=/ws#MyNode"
 
-# 自定义在 profiles 仓库中的存根文件名
+# 自定义文件名
 ./converter.sh "vless://..." -o my_server.json
 ```
 
 ### 3. 极速起航与切换
 
 ```bash
-# 自动启动存在于 run/ 沙箱中的配置
-./shield.sh
-
-# 想要切换配置？无需深入路径！这一条参数会自动洗刷沙箱，完成优雅变轨
+# 激活指定节点并启动（自动清洗 run/ 沙箱）
 ./shield.sh my_server.json
+
+# 直接启动 run/ 中已有的配置
+./shield.sh
 ```
 
 ### 4. 使用代理

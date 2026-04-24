@@ -21,6 +21,10 @@ readonly XRAY_BIN="${SCRIPT_DIR}/xray"
 readonly PROFILES_DIR="${SCRIPT_DIR}/profiles"
 readonly RUN_DIR="${SCRIPT_DIR}/run"
 
+# ── 端口常量（与 converter.sh 保持一致）────────────────────────────────────────
+readonly SOCKS_PORT=37080
+readonly HTTP_PORT=37081
+
 # ============================================================================
 # 工具函数
 # ============================================================================
@@ -86,16 +90,6 @@ load_config() {
         fi
     fi
 
-    # 提取端口号（从 JSON 配置中解析 SOCKS5 和 HTTP 端口）
-    extract_ports
-}
-
-extract_ports() {
-    # 向上搜索 protocol 附近的 port，不依赖 JSON 键顺序
-    SOCKS_PORT=$(grep -B4 '"protocol".*"socks"' "$CONFIG_PATH" | grep '"port"' | grep -oE '[0-9]+' | head -1)
-    HTTP_PORT=$(grep -B4 '"protocol".*"http"' "$CONFIG_PATH" | grep '"port"' | grep -oE '[0-9]+' | head -1)
-    : "${SOCKS_PORT:=37080}"
-    : "${HTTP_PORT:=37081}"
 }
 
 # ============================================================================

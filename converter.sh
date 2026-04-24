@@ -393,13 +393,6 @@ main() {
     # 生成配置至库
     generate_config "$output_path"
 
-    # 激活新节点：将物理副本当作唯一的运行态置于 run/ 下
-    local run_dir="${SCRIPT_DIR}/run"
-    mkdir -p "$run_dir"
-    rm -f "${run_dir}"/*
-    cp "$output_path" "${run_dir}/config.json"
-    echo "$output_name" > "${run_dir}/node.name"
-
     # 输出摘要
     echo ""
     echo -e "  ${GREEN}\u2713${RESET} ${CYAN}${REMARK}${RESET}"
@@ -407,9 +400,8 @@ main() {
     echo "    地址  ${ADDRESS}:${PORT}"
     echo "    协议  ${NETWORK} + ${SECURITY}"
     echo "    文件  ${output_path}"
-    echo "    端口  SOCKS5=${DEFAULT_SOCKS_PORT}  HTTP=${DEFAULT_HTTP_PORT}"
     echo ""
-    echo -e "  ${GREEN}\u2192${RESET} ./shield.sh 启动代理"
+    echo -e "  ${GREEN}\u2192${RESET} ./shield.sh ${output_name}  启动并激活此节点"
 }
 
 main "$@"
