@@ -376,8 +376,8 @@ main() {
 
     # 确定输出文件名
     if [[ -z "$output_name" ]]; then
-        # 清理备注名中的非法文件名字符
-        local safe_name="${REMARK//[^a-zA-Z0-9_\-\.]/_}"
+        # 剔除文件系统危险字符，保留 Unicode（中文/emoji 等）
+        local safe_name="${REMARK//[\/\\:*?\"<>| ]/_}"
         safe_name="${safe_name:-node_$(date +%s)}"
         output_name="${safe_name}.json"
     fi
