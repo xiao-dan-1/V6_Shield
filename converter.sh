@@ -32,20 +32,19 @@ die() {
 
 usage() {
     cat <<EOF
-${CYAN}V6_Shield — VLESS 订阅转换器${RESET}
+${CYAN}V6_Shield — 原生多协议代理配置转换引擎${RESET}
 
 用法:
-    $(basename "$0") <vless://...> [-o <filename>]
+    $(basename "$0") <link> [-o <filename>]
 
 参数:
-    <vless://...>       VLESS 订阅链接
+    <link>              节点订阅链接 (支持 vless://, trojan://)
     -o <filename>       自定义输出文件名（不含路径，存入 profiles/）
 
 示例:
-    $(basename "$0") "vless://uuid@host:443?type=ws&security=tls&path=/ws#MyNode"
     $(basename "$0") "vless://uuid@host:443?type=tcp&security=reality&sni=example.com#MyNode" -o mynode.json
 
-支持的传输协议:
+支持的底层传输:
     • WebSocket + TLS
     • TCP + Reality
     • gRPC + TLS/Reality
@@ -79,17 +78,28 @@ _join() {
 }
 
 # ============================================================================
-# VLESS 链接解析器
+# 节点链接调度与解析系统 (Dispatcher & Parsers)
 # ============================================================================
 
-parse_vless_link() {
+# 核心调度器：根据协议头动态分发
+parse_link() {
     local link="$1"
+    
+    # 提取协议头转换为小写，如 vless, trojan
+    PROTOCOL="${link%%://*}"
+    PROTOCOL="${PROTOCOL,,}"
+    
+    local parser_func="parse_${PROTOCOL}_link"
+    if type "$parser_func" &>/dev/null; then
+        "$parser_func" "$link"
+    else
+        die "暂不支持该协议: ${PROTOCOL} (当前支持: vless, trojan)"
+    fi
+}
 
-    # 校验协议头
-    [[ "$link" =~ ^vless:// ]] || die "无效的 VLESS 链接：必须以 vless:// 开头"
-
-    # 去掉 vless:// 前缀
-    local body="${link#vless://}"
+# 提取绝大部分节点的通用解析逻辑 (提取凭据、地址、端口、查询参数)
+_parse_common_link() {
+    local body="$1"
 
     # 提取备注名（# 之后的部分）
     if [[ "$body" == *"#"* ]]; then
@@ -99,9 +109,9 @@ parse_vless_link() {
         REMARK="node_$(date +%s)"
     fi
 
-    # 提取 UUID（@ 之前的部分）
-    UUID="${body%%@*}"
-    [[ -n "$UUID" ]] || die "无法解析 UUID"
+    # 提取凭据（@ 之前的部分）
+    CREDENTIAL="${body%%@*}"
+    [[ -n "$CREDENTIAL" ]] || die "无法解析凭据属性"
     body="${body#*@}"
 
     # 分离 host:port 和查询参数
@@ -130,7 +140,7 @@ parse_vless_link() {
     SNI=""           WS_PATH="/"     WS_HOST=""
     GRPC_SERVICE=""  FLOW=""         FINGERPRINT=""
     PUBLIC_KEY=""    SHORT_ID=""     SPIDER_X=""
-    ALPN=""          HEADER_TYPE=""
+    ALPN=""          HEADER_TYPE=""  ALLOW_INSECURE=""  PCS=""
 
     if [[ -n "$query_part" ]]; then
         local IFS='&'
@@ -153,23 +163,36 @@ parse_vless_link() {
                 spx)            SPIDER_X="$value" ;;
                 alpn)           ALPN="$value" ;;
                 headerType)     HEADER_TYPE="$value" ;;
+                allowInsecure|insecure)
+                    [[ "$value" == "1" || "$value" == "true" ]] && ALLOW_INSECURE="true" ;;
+                pcs)            PCS="$value" ;;
             esac
         done
         unset IFS
     fi
 }
 
+parse_vless_link() {
+    _parse_common_link "${1#*://}"
+    UUID="$CREDENTIAL"
+}
+
+parse_trojan_link() {
+    _parse_common_link "${1#*://}"
+    PASSWORD="$CREDENTIAL"
+}
+
 # ============================================================================
 # JSON 配置生成器（声明式微引擎）
 # ============================================================================
 
-# 声明式 JSON 对象构建：空值自动过滤，自动处理引号（支持自动识别嵌套 {}/[]/bool）
+# 声明式 JSON 对象构建：空值自动过滤，自动处理引号（支持自动识别嵌套 {}/[]/bool/特例 Integer key）
 _obj() {
     local f=()
     while (( $# >= 2 )); do
         if [[ -n "$1" && -n "$2" ]]; then
-            if [[ "$2" =~ ^(\{.*\}|\[.*\]|true|false)$ ]]; then
-                f+=("\"$1\": $2")
+            if [[ "$2" =~ ^(\{.*\}|\[.*\]|true|false)$ ]] || [[ "$1" == "port" ]]; then
+                f+=("\"$1\": $2") # raw inject
             else
                 f+=("\"$1\": \"$(json_escape "$2")\"")
             fi
@@ -188,7 +211,19 @@ _tls_block() {
         unset IFS
         alpn_json="[$(_join ', ' "${items[@]}")]"
     fi
-    _obj serverName "$SNI" fingerprint "$FINGERPRINT" alpn "$alpn_json"
+
+    local pcs_json=""
+    if [[ -n "$PCS" ]]; then
+        local items=()
+        local IFS=','
+        for p in $PCS; do items+=("\"$(json_escape "$p")\""); done
+        unset IFS
+        pcs_json="[$(_join ', ' "${items[@]}")]"
+    fi
+
+    _obj serverName "$SNI" fingerprint "$FINGERPRINT" alpn "$alpn_json" \
+         allowInsecure "$ALLOW_INSECURE" \
+         pinnedPeerCertificateChainSha256 "$pcs_json"
 }
 
 _reality_block() {
@@ -226,11 +261,26 @@ generate_stream_settings() {
          "$net_key" "$net_val"
 }
 
+# ============================================================================
+# 协议核心构建多态 (Polymorphic Outbound Settings)
+# ============================================================================
+
+generate_vless_settings() {
+    local user_obj="$(_obj id "$UUID" encryption "none" flow "$FLOW")"
+    local server_obj="$(_obj address "$ADDRESS" port "$PORT" users "[ ${user_obj} ]")"
+    echo "{\"vnext\": [ ${server_obj} ]}"
+}
+
+generate_trojan_settings() {
+    local server_obj="$(_obj address "$ADDRESS" port "$PORT" password "$PASSWORD")"
+    echo "{\"servers\": [ ${server_obj} ]}"
+}
+
 generate_config() {
     local output_file="$1"
 
-    # 生成配置块
-    local user_obj="$(_obj id "$UUID" encryption "none" flow "$FLOW")"
+    # 多态调用并生成配置块
+    local protocol_settings="$(generate_${PROTOCOL,,}_settings)"
     local stream_settings_obj="$(generate_stream_settings)"
 
     cat > "$output_file" <<JSONEOF
@@ -258,18 +308,8 @@ generate_config() {
   "outbounds": [
     {
       "tag": "proxy",
-      "protocol": "vless",
-      "settings": {
-        "vnext": [
-          {
-            "address": "$(json_escape "$ADDRESS")",
-            "port": ${PORT},
-            "users": [
-              ${user_obj}
-            ]
-          }
-        ]
-      },
+      "protocol": "${PROTOCOL,,}",
+      "settings": ${protocol_settings},
       "streamSettings": ${stream_settings_obj}
     },
     {
@@ -301,7 +341,7 @@ JSONEOF
 # ============================================================================
 
 main() {
-    local vless_link=""
+    local node_link=""
     local output_name=""
 
     # 参数解析
@@ -315,8 +355,8 @@ main() {
                 [[ $# -gt 0 ]] || die "-o 参数需要指定文件名"
                 output_name="$1"
                 ;;
-            vless://*)
-                vless_link="$1"
+            *://*)
+                node_link="$1"
                 ;;
             *)
                 die "未知参数: $1\n使用 --help 查看帮助"
@@ -325,10 +365,10 @@ main() {
         shift
     done
 
-    [[ -n "$vless_link" ]] || die "请提供 VLESS 链接\n使用 --help 查看帮助"
+    [[ -n "$node_link" ]] || die "请提供节点订阅链接\n使用 --help 查看帮助"
 
-    # 解析链接
-    parse_vless_link "$vless_link"
+    # 分发与解析链接
+    parse_link "$node_link"
 
     # 确定输出文件名
     if [[ -z "$output_name" ]]; then

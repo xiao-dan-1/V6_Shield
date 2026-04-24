@@ -57,10 +57,10 @@ main() {
         
         # ── 闪电测速 (TCP Ping) ────────────
         local config_file="${PROFILES_DIR}/${name}"
-        # 精准切出 vnext 远端节点块以避免提取到本地 Inbound 的监听端口
-        local vnext_block=$(sed -n '/"vnext"/,/"users"/p' "$config_file")
-        local addr=$(echo "$vnext_block" | grep '"address":' | head -n 1 | sed -E 's/.*"address":\s*"([^"]+)".*/\1/')
-        local port=$(echo "$vnext_block" | grep '"port":' | head -n 1 | sed -E 's/.*"port":\s*([0-9]+).*/\1/')
+        # 精准切出 outbounds 远端节点块以避免提取到本地 Inbound 的监听端口
+        local outbounds_block=$(sed -n '/"outbounds"/,/"streamSettings"/p' "$config_file")
+        local addr=$(echo "$outbounds_block" | grep '"address":' | head -n 1 | sed -E 's/.*"address":\s*"([^"]+)".*/\1/')
+        local port=$(echo "$outbounds_block" | grep '"port":' | head -n 1 | sed -E 's/.*"port":\s*([0-9]+).*/\1/')
         
         local latency_str="${RED}超时/阻断${RESET}"
         if [[ -n "$addr" && -n "$port" ]]; then
