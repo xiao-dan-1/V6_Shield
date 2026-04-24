@@ -48,40 +48,34 @@ ${CYAN}V6_Shield — VLESS 订阅转换器${RESET}
 支持的传输协议:
     • WebSocket + TLS
     • TCP + Reality
-    • gRPC + TLS
+    • gRPC + TLS/Reality
     • TCP + TLS
     • TCP (无加密)
 EOF
     exit 0
 }
 
-# ============================================================================
-# URL 解码（纯 Bash 实现）
-# ============================================================================
+# URL 解码：%XX → 对应字符（RFC 3986 标准，+ 号保持原义）
+url_decode() { printf '%b' "${1//%/\\x}"; }
 
-url_decode() {
-    local encoded="$1"
-    local decoded=""
-    local i=0
-    local len=${#encoded}
+# 转义 JSON 字符串中的特殊字符
+json_escape() {
+    local str="$1"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\r'/\\r}"
+    str="${str//$'\t'/\\t}"
+    echo "$str"
+}
 
-    while (( i < len )); do
-        local char="${encoded:i:1}"
-        if [[ "$char" == "%" ]] && (( i + 2 < len )); then
-            local hex="${encoded:i+1:2}"
-            # 使用 printf 将十六进制转为字符
-            decoded+=$(printf "\\x${hex}")
-            (( i += 3 ))
-        elif [[ "$char" == "+" ]]; then
-            decoded+=" "
-            (( i += 1 ))
-        else
-            decoded+="$char"
-            (( i += 1 ))
-        fi
-    done
-
-    echo "$decoded"
+# 将参数用指定分隔符连接（数组聚合模式的基础设施）
+_join() {
+    local sep="$1"; shift
+    (( $# )) || return 0
+    local first="$1"; shift
+    printf '%s' "$first"
+    printf '%s' "${@/#/$sep}"
 }
 
 # ============================================================================
@@ -119,13 +113,11 @@ parse_vless_link() {
 
     # 解析地址和端口（支持 IPv6 方括号格式）
     if [[ "$host_port_part" == "["* ]]; then
-        # IPv6 地址: [::1]:443
         ADDRESS="${host_port_part%%]*}"
         ADDRESS="${ADDRESS#[}"
         local remaining="${host_port_part#*]}"
         PORT="${remaining#:}"
     else
-        # IPv4 或域名: host:443
         ADDRESS="${host_port_part%%:*}"
         PORT="${host_port_part##*:}"
     fi
@@ -133,23 +125,14 @@ parse_vless_link() {
     [[ -n "$ADDRESS" ]] || die "无法解析服务器地址"
     [[ -n "$PORT" ]] || die "无法解析服务器端口"
 
-    # 解析查询参数
-    NETWORK="tcp"
-    SECURITY="none"
-    SNI=""
-    WS_PATH="/"
-    WS_HOST=""
-    GRPC_SERVICE=""
-    FLOW=""
-    FINGERPRINT=""
-    PUBLIC_KEY=""
-    SHORT_ID=""
-    SPIDER_X=""
-    ALPN=""
-    HEADER_TYPE=""
+    # 初始化查询参数默认值
+    NETWORK="tcp"    SECURITY="none"
+    SNI=""           WS_PATH="/"     WS_HOST=""
+    GRPC_SERVICE=""  FLOW=""         FINGERPRINT=""
+    PUBLIC_KEY=""    SHORT_ID=""     SPIDER_X=""
+    ALPN=""          HEADER_TYPE=""
 
     if [[ -n "$query_part" ]]; then
-        # 将 & 分隔的参数逐一解析
         local IFS='&'
         for param in $query_part; do
             local key="${param%%=*}"
@@ -177,101 +160,78 @@ parse_vless_link() {
 }
 
 # ============================================================================
-# JSON 配置生成器
+# JSON 配置生成器（声明式微引擎）
 # ============================================================================
 
-# 转义 JSON 字符串中的特殊字符
-json_escape() {
-    local str="$1"
-    str="${str//\\/\\\\}"
-    str="${str//\"/\\\"}"
-    str="${str//$'\n'/\\n}"
-    str="${str//$'\r'/\\r}"
-    str="${str//$'\t'/\\t}"
-    echo "$str"
+# 声明式 JSON 对象构建：空值自动过滤，自动处理引号（支持自动识别嵌套 {}/[]/bool）
+_obj() {
+    local f=()
+    while (( $# >= 2 )); do
+        if [[ -n "$1" && -n "$2" ]]; then
+            if [[ "$2" =~ ^(\{.*\}|\[.*\]|true|false)$ ]]; then
+                f+=("\"$1\": $2")
+            else
+                f+=("\"$1\": \"$(json_escape "$2")\"")
+            fi
+        fi
+        shift 2
+    done
+    echo "{$(_join ', ' "${f[@]}")}"
+}
+
+_tls_block() {
+    local alpn_json=""
+    if [[ -n "$ALPN" ]]; then
+        local items=()
+        local IFS=','
+        for a in $ALPN; do items+=("\"$(json_escape "$a")\""); done
+        unset IFS
+        alpn_json="[$(_join ', ' "${items[@]}")]"
+    fi
+    _obj serverName "$SNI" fingerprint "$FINGERPRINT" alpn "$alpn_json"
+}
+
+_reality_block() {
+    _obj serverName "$SNI" fingerprint "$FINGERPRINT" \
+         publicKey "$PUBLIC_KEY" shortId "$SHORT_ID" spiderX "$SPIDER_X"
+}
+
+_ws_block() {
+    local headers_json=""
+    [[ -n "$WS_HOST" ]] && headers_json="{\"Host\": \"$(json_escape "$WS_HOST")\"}"
+    _obj path "$WS_PATH" headers "$headers_json"
+}
+
+_grpc_block() {
+    _obj serviceName "$GRPC_SERVICE" multiMode "false"
 }
 
 generate_stream_settings() {
-    local stream=""
+    local sec_key="" sec_val="" net_key="" net_val=""
+    
+    case "$SECURITY" in
+        tls)     sec_key="tlsSettings"     sec_val="$(_tls_block)" ;;
+        reality) sec_key="realitySettings" sec_val="$(_reality_block)" ;;
+    esac
 
-    # 传输层配置
-    stream+="\"network\": \"${NETWORK}\""
+    case "$NETWORK" in
+        ws)   net_key="wsSettings"   net_val="$(_ws_block)" ;;
+        grpc) net_key="grpcSettings" net_val="$(_grpc_block)" ;;
+        tcp)  [[ "$HEADER_TYPE" == "http" ]] && net_key="tcpSettings" net_val="{\"header\": {\"type\": \"http\"}}" ;;
+    esac
 
-    # ── 安全层 ────────────────────────────────────────────────────────────
-    if [[ "$SECURITY" == "tls" ]]; then
-        stream+=",\n        \"security\": \"tls\""
-        stream+=",\n        \"tlsSettings\": {"
-        [[ -n "$SNI" ]] && stream+="\n          \"serverName\": \"$(json_escape "$SNI")\","
-        if [[ -n "$FINGERPRINT" ]]; then
-            stream+="\n          \"fingerprint\": \"$(json_escape "$FINGERPRINT")\","
-        fi
-        if [[ -n "$ALPN" ]]; then
-            # 将逗号分隔的 alpn 转为 JSON 数组
-            local alpn_arr=""
-            local IFS=','
-            for a in $ALPN; do
-                [[ -n "$alpn_arr" ]] && alpn_arr+=", "
-                alpn_arr+="\"$(json_escape "$a")\""
-            done
-            unset IFS
-            stream+="\n          \"alpn\": [${alpn_arr}],"
-        fi
-        # 移除末尾逗号
-        stream="${stream%,}"
-        stream+="\n        }"
-
-    elif [[ "$SECURITY" == "reality" ]]; then
-        stream+=",\n        \"security\": \"reality\""
-        stream+=",\n        \"realitySettings\": {"
-        [[ -n "$SNI" ]] && stream+="\n          \"serverName\": \"$(json_escape "$SNI")\","
-        [[ -n "$FINGERPRINT" ]] && stream+="\n          \"fingerprint\": \"$(json_escape "$FINGERPRINT")\","
-        [[ -n "$PUBLIC_KEY" ]] && stream+="\n          \"publicKey\": \"$(json_escape "$PUBLIC_KEY")\","
-        [[ -n "$SHORT_ID" ]] && stream+="\n          \"shortId\": \"$(json_escape "$SHORT_ID")\","
-        [[ -n "$SPIDER_X" ]] && stream+="\n          \"spiderX\": \"$(json_escape "$SPIDER_X")\","
-        # 移除末尾逗号
-        stream="${stream%,}"
-        stream+="\n        }"
-    else
-        stream+=",\n        \"security\": \"none\""
-    fi
-
-    # ── 传输层详细配置 ────────────────────────────────────────────────────
-    if [[ "$NETWORK" == "ws" ]]; then
-        stream+=",\n        \"wsSettings\": {"
-        stream+="\n          \"path\": \"$(json_escape "$WS_PATH")\""
-        if [[ -n "$WS_HOST" ]]; then
-            stream+=",\n          \"headers\": { \"Host\": \"$(json_escape "$WS_HOST")\" }"
-        fi
-        stream+="\n        }"
-
-    elif [[ "$NETWORK" == "grpc" ]]; then
-        stream+=",\n        \"grpcSettings\": {"
-        stream+="\n          \"serviceName\": \"$(json_escape "$GRPC_SERVICE")\","
-        stream+="\n          \"multiMode\": false"
-        stream+="\n        }"
-
-    elif [[ "$NETWORK" == "tcp" ]]; then
-        if [[ "$HEADER_TYPE" == "http" ]]; then
-            stream+=",\n        \"tcpSettings\": {"
-            stream+="\n          \"header\": { \"type\": \"http\" }"
-            stream+="\n        }"
-        fi
-    fi
-
-    echo -e "$stream"
+    _obj network "$NETWORK" \
+         security "$SECURITY" \
+         "$sec_key" "$sec_val" \
+         "$net_key" "$net_val"
 }
 
 generate_config() {
     local output_file="$1"
 
-    # 用户配置（outbound）
-    local user_block="\"id\": \"$(json_escape "$UUID")\", \"encryption\": \"none\""
-    if [[ -n "$FLOW" ]]; then
-        user_block+=", \"flow\": \"$(json_escape "$FLOW")\""
-    fi
-
-    local stream_settings
-    stream_settings="$(generate_stream_settings)"
+    # 生成配置块
+    local user_obj="$(_obj id "$UUID" encryption "none" flow "$FLOW")"
+    local stream_settings_obj="$(generate_stream_settings)"
 
     cat > "$output_file" <<JSONEOF
 {
@@ -305,16 +265,12 @@ generate_config() {
             "address": "$(json_escape "$ADDRESS")",
             "port": ${PORT},
             "users": [
-              {
-                ${user_block}
-              }
+              ${user_obj}
             ]
           }
         ]
       },
-      "streamSettings": {
-        ${stream_settings}
-      }
+      "streamSettings": ${stream_settings_obj}
     },
     {
       "tag": "direct",
