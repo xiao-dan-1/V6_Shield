@@ -1,99 +1,97 @@
-# V6_Shield
+# V6_Shield — 极简代理护盾
 
-> 跨平台、零侵入、极简的 Xray 代理引擎
+> **极简 · 优雅 · 零侵入**
+> 专为 Linux 终端而生的 Xray 极速分发引擎。
 
-**只做两件事**：将 VLESS 链接转为配置，然后前台运行 Xray。
+本项目旨在抛弃臃肿的 GUI 客户端与繁琐的依赖，以奥卡姆剃刀原则重构代理管线。
 
-## 架构
+---
 
-```
+## 核心特性
+
+- **🚀 闪电探针**：基于原生 `/dev/tcp` 的毫秒级 Socket 探测，不依赖外部工具即可在菜单中扫视节点存活与延迟。
+- **🛡️ 纯净沙箱**：配置存储 (`profiles/`) 与执行环境 (`run/`) 物理隔离。运行期间沙箱内仅存单体配置文件，杜绝误读风险。
+- **🔌 深度渗透**：一键接管系统代理。支持 GNOME 桌面环境设置与 Shell 环境（`.bashrc` / `.zshrc`）的幂等持久化注入。
+- **⚡ 烘焙路由**：路由规则直接内联至配置流。不再需要外部 `routing.json`，实现 100% 的单体自容错。
+- **⚛️ 零依赖**：全量代码基于 Bash 4.0+，无需 Python/NodeJS 等运行库，保持宿主环境绝对纯净。
+
+---
+
+## 架构阵列
+
+```text
 V6_Shield/
-├── shield.sh       # 启动脚本（主入口）
-├── nodes.sh        # 节点管理交互控制台
-├── converter.sh    # VLESS 订阅转换器
-├── install_xray.sh # Xray 自动安装器
-├── profiles/       # 节点配置仓库
-├── run/            # 运行沙箱（仅存放当前 config.json）
+├── shield.sh       # 启动枢纽（主入口：Fail-Fast 预检 → 沙箱激活 → 宿主托管）
+├── nodes.sh        # 交互中枢（节点管理、TCP 闪电测速、动态菜单、热销毁）
+├── converter.sh    # 配置引擎（链接解析、多协议分发、内联路由烘焙）
+├── proxy.sh        # 代理管线（桌面级/终端级代理同步注入与平滑移除）
+├── profiles/       # 节点军火库（存放生成的 JSON 图纸）
+├── run/            # 绝对沙箱（运行时的隔离跑道）
 └── xray            # Xray Core 二进制
 ```
 
-三大核心哲学彻底解耦：
-- **配置文件物理隔离**：所有的订阅转换沉淀在 `profiles/` 这座兵工厂内。
-- **运行沙箱绝对纯净**：真正交给 `shield.sh` 与 `xray` 挂载的只有 `run/config.json` 这一条航线。
-- **职责单一**：`converter.sh` 只管转换存档，`shield.sh` 负责激活与托管，`nodes.sh` 负责交互管理。
+---
 
-## 快速开始
+## 快速上手
 
-### 1. 放置 Xray Core
-
-使用自动化脚本一键安装：
-
+### 1. 自动化环境准备
 ```bash
 chmod +x install_xray.sh
 ./install_xray.sh
 ```
 
-### 2. 导入节点
-
+### 2. 导入节点链接 (支持 VLESS / Trojan)
 ```bash
-# 转换 VLESS 链接，生成配置存入 profiles/
-./converter.sh "vless://uuid@server:443?type=ws&security=tls&path=/ws#MyNode"
+# 导入并自动解析备注名
+./converter.sh "vless://..."
 
-# 自定义文件名
-./converter.sh "vless://..." -o my_server.json
+# 自定义存档名称
+./converter.sh "trojan://..." -o my_server.json
 ```
 
-### 3. 极速起航与切换
-
+### 3. 可视化节点管理 (首选方案)
 ```bash
-# 激活指定节点并启动（自动清洗 run/ 沙箱）
-./shield.sh my_server.json
+# 运行交互式控制台，查看实时延迟并切换节点
+./nodes.sh
+```
 
-# 直接启动 run/ 中已有的配置
+### 4. 激活护盾
+```bash
+# 启动最近一次在 nodes.sh 中选中的节点
 ./shield.sh
+
+# 或直接指定 profiles/ 中的文件启动
+./shield.sh my_server.json
 ```
 
-### 4. 使用代理
-
+### 5. 一键接管系统代理
 ```bash
-# SOCKS5 代理
-export ALL_PROXY=socks5://127.0.0.1:37080
-
-# HTTP 代理
-export HTTP_PROXY=http://127.0.0.1:37081
-export HTTPS_PROXY=http://127.0.0.1:37081
-
-# 测试连通性
-curl -x socks5://127.0.0.1:37080 https://ipinfo.io
+./proxy.sh on   # 同时开启终端环境变量 (持久化) 与桌面网络设置
+./proxy.sh off  # 平滑移除所有注入标记，还系统一份纯净
 ```
 
-### 5. 停止代理
+---
 
-直接关闭终端窗口即可。进程随窗口生灭，无需额外清理。
+## 支持协议
+
+| 传输管线 | 安全层 | 状态 |
+| :--- | :--- | :--- |
+| **WebSocket** | TLS | ✅ |
+| **TCP** | Reality | ✅ |
+| **gRPC** | TLS / Reality | ✅ |
+| **TCP** | TLS / HTTP Header | ✅ |
+| **Trojan** | TLS | ✅ |
+
+---
 
 ## 设计哲学
 
-- **奥卡姆剃刀** — 只保留最纯粹的启动与托管骨架
-- **前台运行** — 不做后台守护，不污染系统代理
-- **物理隔离** — 配置与运行彻底解耦
-- **高位端口** — SOCKS5 `37080`，HTTP `37081`，避免冲突
-- **零清理** — 配置固化在 profiles/，无需死后文件清理
+- **奥卡姆剃刀**：如果不需要，那就删掉它。
+- **显式状态机**：通过 `run/` 沙箱和符号链接，让运行状态在文件系统中清晰可见。
+- **职责单一**：脚本之间通过文件指针通信，互不耦合。
+- **防御性路由**：内置局域网绕过与节点 IP 直连，保护隧道不自噬。
 
-## 支持的协议
-
-| 传输 | 安全层 | 状态 |
-|------|--------|------|
-| WebSocket | TLS | ✅ |
-| TCP | Reality | ✅ |
-| gRPC | TLS | ✅ |
-| TCP | TLS | ✅ |
-| TCP | None | ✅ |
-
-## 系统要求
-
-- Bash 4.0+
-- Linux / macOS / WSL
+---
 
 ## License
-
 [AGPL-3.0](LICENSE)
